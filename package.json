@@ -2,14 +2,29 @@
   "name": "commander-chess",
   "version": "1.0.0",
   "description": "A Javascript library for managing commander chess game",
-  "main": "index.js",
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
-  },
+  "main": "dist/index.js",
+  "types": "index.d.ts",
+  "type": "module",
   "author": "Hoang Manh",
   "license": "ISC",
+  "scripts": {
+    "compile": "tsc --sourceMap --declaration",
+    "format": "prettier --write .",
+    "check-format": "prettier --check .",
+    "bundle": "esbuild src/index.ts --bundle --format=esm --outfile=dist/index.min.js --minify",
+    "dist": "$npm_execpath run compile && $npm_execpath run bundle",
+    "prepare": "husky"
+  },
   "devDependencies": {
     "@types/node": "^22.13.11",
+    "esbuild": "^0.25.1",
+    "husky": "^9.1.7",
+    "prettier": "^3.5.3",
     "typescript": "^5.8.2"
+  },
+  "exports": {
+    ".": "./dist/index.js",
+    "./assets/*": "./assets/*",
+    "./*": "./dist/*.js"
   }
 }
