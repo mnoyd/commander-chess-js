@@ -34,6 +34,15 @@ const DIRECTIONS = {
   NW: -17, // Move up-left
 };
 
+type RayCache = {
+  [key: number]: {
+    [direction: number]: Position[];
+  };
+};
+
+const RAYS: RayCache = {};
+
+// You can call this after precomputeRays() to see the results
 // Change PieceType to PieceType
 enum PieceType {
   INFANTRY = 'INFANTRY',
@@ -45,6 +54,7 @@ enum PieceType {
   ANTI_AIR = 'ANTI_AIR',
   AIR_FORCE = 'AIR_FORCE',
   NAVY = 'NAVY',
+  COMMANDER = 'COMMANDER', // Added Commander
 }
 
 // Update MovementPattern interface reference
@@ -101,6 +111,12 @@ const PIECE_PATTERNS: Record<PieceType, MovementPattern> = {
     directions: Object.values(DIRECTIONS),
     attackRange: 3,
   },
+  // Added Commander pattern
+  [PieceType.COMMANDER]: {
+    maxRange: Math.max(BOARD_WIDTH, BOARD_HEIGHT), // Effectively unlimited straight movement
+    directions: [DIRECTIONS.N, DIRECTIONS.E, DIRECTIONS.S, DIRECTIONS.W],
+    attackRange: 1, // Can only attack adjacent pieces
+  },
 };
 
 type BoardIndex = number;
@@ -117,7 +133,47 @@ function toPosition(index: BoardIndex): Position {
 }
 
 function isValidIndex(index: BoardIndex): boolean {
-  return (index & BOARD_MASK) === 0 && (index & 0xf) < BOARD_WIDTH && index >> 4 < BOARD_HEIGHT;
+  // Check if x is within width and y is within height
+  // Removed incorrect '(index & BOARD_MASK) === 0 &&' check
+  return (index & 0xf) < BOARD_WIDTH && index >> 4 < BOARD_HEIGHT;
+}
+
+// Add after isValidIndex function
+function precomputeRays() {
+  for (let y = 0; y < BOARD_HEIGHT; y++) {
+    for (let x = 0; x < BOARD_WIDTH; x++) {
+      const startIndex = toIndex({ x, y });
+      RAYS[startIndex] = {};
+
+      for (const direction of Object.values(DIRECTIONS)) {
+        const ray: Position[] = [];
+        let currentIndex = startIndex;
+
+        while (true) {
+          currentIndex += direction;
+          if (!isValidIndex(currentIndex)) break;
+          ray.push(toPosition(currentIndex));
+        }
+
+        RAYS[startIndex][direction] = ray;
+      }
+    }
+  }
+}
+
+// Add after the precomputeRays function
+function printRays() {
+  for (let y = 0; y < BOARD_HEIGHT; y++) {
+    for (let x = 0; x < BOARD_WIDTH; x++) {
+      const startIndex = toIndex({ x, y });
+      console.log(`\nRays from position (${x}, ${y}):`);
+
+      for (const [dirKey, dir] of Object.entries(DIRECTIONS)) {
+        const ray = RAYS[startIndex][dir];
+        console.log(`${dirKey}: ${ray.map(pos => `(${pos.x},${pos.y})`).join(' -> ')}`);
+      }
+    }
+  }
 }
 
 // Rename Piece class to Piece
@@ -162,6 +218,7 @@ const PIECE_INFO: Record<PieceType, PieceInfo> = {
   [PieceType.ANTI_AIR]: { symbol: 'g', shortcut: 'G' },
   [PieceType.AIR_FORCE]: { symbol: 'f', shortcut: 'F' },
   [PieceType.NAVY]: { symbol: 'n', shortcut: 'N' },
+  [PieceType.COMMANDER]: { symbol: 'c', shortcut: 'C' }, // Added Commander info
 };
 
 // Add this before the Game class
@@ -178,6 +235,9 @@ class Game {
 
   constructor(fen?: string) {
     this.pieces = new Array(256).fill(null);
+    if (Object.keys(RAYS).length === 0) {
+      precomputeRays();
+    }
     if (fen) {
       this.loadFEN(fen);
     }
@@ -187,32 +247,51 @@ class Game {
     return this.pieces[index];
   }
 
+  // Update getValidMoves to use rays
   getValidMoves(piece: Piece): Position[] {
     const pattern = piece.getMovementPattern();
     const validMoves: Position[] = [];
     const startIndex = toIndex(piece.position);
 
     for (const direction of pattern.directions) {
-      for (let range = 1; range <= pattern.maxRange; range++) {
-        const targetIndex = startIndex + direction * range;
+      const ray = RAYS[startIndex][direction];
+      for (let i = 0; i < Math.min(ray.length, pattern.maxRange); i++) {
+        const pos = ray[i];
+        const targetPiece = this.getPiece(toIndex(pos));
 
-        if (!isValidIndex(targetIndex)) break;
-
-        const targetPiece = this.getPiece(targetIndex);
         if (targetPiece) {
           if (targetPiece.player !== piece.player) {
-            validMoves.push(toPosition(targetIndex));
+            validMoves.push(pos);
           }
           break;
         }
+        validMoves.push(pos);
+      }
+    }
 
-        validMoves.push(toPosition(targetIndex));
+    // Handle diagonal moves for pieces like missile
+    if (pattern.diagonalDirections && pattern.diagonalRange) {
+      for (const direction of pattern.diagonalDirections) {
+        const ray = RAYS[startIndex][direction];
+        for (let i = 0; i < Math.min(ray.length, pattern.diagonalRange); i++) {
+          const pos = ray[i];
+          const targetPiece = this.getPiece(toIndex(pos));
+
+          if (targetPiece) {
+            if (targetPiece.player !== piece.player) {
+              validMoves.push(pos);
+            }
+            break;
+          }
+          validMoves.push(pos);
+        }
       }
     }
 
     return validMoves;
   }
 
+  // Update getValidAttacks to use rays
   getValidAttacks(piece: Piece): Position[] {
     const pattern = piece.getMovementPattern();
     if (!pattern.attackRange) return [];
@@ -221,14 +300,13 @@ class Game {
     const startIndex = toIndex(piece.position);
 
     for (const direction of pattern.directions) {
-      for (let range = 1; range <= pattern.attackRange; range++) {
-        const targetIndex = startIndex + direction * range;
+      const ray = RAYS[startIndex][direction];
+      for (let i = 0; i < Math.min(ray.length, pattern.attackRange); i++) {
+        const pos = ray[i];
+        const targetPiece = this.getPiece(toIndex(pos));
 
-        if (!isValidIndex(targetIndex)) break;
-
-        const targetPiece = this.getPiece(targetIndex);
         if (targetPiece && targetPiece.player !== piece.player) {
-          attacks.push(toPosition(targetIndex));
+          attacks.push(pos);
         }
       }
     }
@@ -403,18 +481,6 @@ class Game {
 }
 
 // Update exports at the end of the file
-export {
-  Game,
-  Piece,
-  PieceType,
-  Terrain,
-  Position,
-  Move,
-  PIECE_INFO,
-  Turn,
-  toIndex, // Add this line
-};
-
 interface Move {
   from: Position;
   to: Position;

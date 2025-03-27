@@ -20,6 +20,8 @@
     "esbuild": "^0.25.1",
     "husky": "^9.1.7",
     "prettier": "^3.5.3",
+    "ts-node": "^10.9.2",
+    "tsconfig-paths": "^4.2.0",
     "typescript": "^5.8.2"
   },
   "exports": {
